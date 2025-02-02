@@ -3,6 +3,9 @@ import type { Request, Response, NextFunction } from "express";
 import { validate } from "../middleware/validate";
 import { RestaurantSchema, type Restaurant } from "../schemas/restaurants";
 import {
+  getCuisineKey,
+  getCuisines,
+  getRestaurantCuisinesKey,
   getRestaurantKeyById,
   getReviewDetailsById,
   getReviewKey,
@@ -30,7 +33,16 @@ router.post(
 
       const payload = { id, name: data.name, location: data.location };
 
-      await client.hSet(restaurantKey, payload);
+      await Promise.all([
+        data.cuisines.map((cuisine) =>
+          Promise.all([
+            client.sAdd(getCuisines, cuisine),
+            client.sAdd(getCuisineKey(cuisine), id), // italian -> rest:1 ,french -> rest:1 
+            client.sAdd(getRestaurantCuisinesKey(id),cuisine) // rest:1 -> italian rest:1-> french
+          ])
+        ),
+        client.hSet(restaurantKey, payload),
+      ]);
 
       return successResponse(res, payload);
     } catch (error) {
@@ -49,12 +61,13 @@ router.get(
 
       const restaurantKey = getRestaurantKeyById(restaurantId);
 
-      const [viewCount, restaurant] = await Promise.all([
+      const [viewCount, restaurant , cuisines] = await Promise.all([
         client.hIncrBy(restaurantKey, "viewCount", 1),
         client.hGetAll(restaurantKey),
+        client.sMembers(getRestaurantCuisinesKey(restaurantId)) // filer by the rest id 
       ]);
 
-      return successResponse(res, restaurant);
+      return successResponse(res, {...restaurant,cuisines});
     } catch (error) {
       next(error);
     }
@@ -66,7 +79,7 @@ router.post(
   checkRestaurantId,
   validate(ReviewSchema),
   async (req: Request<{ restaurantId: string }>, res, next) => {
-    const {restaurantId}=req.params
+    const { restaurantId } = req.params;
     const data = req.body as Review;
 
     const reviewId = nanoid();
@@ -90,46 +103,65 @@ router.post(
   }
 );
 
+router.get(
+  "/:restaurantId/review",
+  checkRestaurantId,
+  async (
+    req: Request<{ restaurantId: string; page: string; limit: string }>,
+    res,
+    next
+  ) => {
+    const { restaurantId } = req.params;
+    const { page, limit } = req.query;
 
-router.get("/:restaurantId/review",checkRestaurantId,async(req: Request<{ restaurantId: string ,page:string,limit:string}>, res, next)=>{
-     const {restaurantId}=req.params
-     const {page,limit}=req.query
-     
-     const start=(Number(page)-1) * Number(limit)
+    const start = (Number(page) - 1) * Number(limit);
 
-     const end = (start + Number(limit) ) - 1
+    const end = start + Number(limit) - 1;
 
-     const reviewKey=getReviewKey(restaurantId)
-     
-     try{
-        const client =await intilizeRedisClient()
-
-        const reviewIds=await client.lRange(reviewKey,start,end)     
-       
-        const reviews=await Promise.all(reviewIds.map(id=>client.hGetAll(getReviewDetailsById(id))))
-        successResponse(res,reviews)
-     }catch(error){
-      next(error)
-     }
-})
-
-router.delete("/:restaurantId/review/:reviewId",checkRestaurantId,async(req:Request<{ restaurantId: string ,reviewId:string}>,res,next)=>{
-    const {restaurantId,reviewId}=req.params
-    const reviewKey=getReviewKey(restaurantId)
-    const reviewDetailsKey=getReviewDetailsById(reviewId)
+    const reviewKey = getReviewKey(restaurantId);
 
     try {
-      const client = await intilizeRedisClient()
-       const [removeResult,deleteReview]=await Promise.all([client.lRem(reviewKey,0,reviewId),client.del(reviewDetailsKey)])
+      const client = await intilizeRedisClient();
 
-       if(!removeResult || !deleteReview ) return errorResponse(res,404,"Review not found")
+      const reviewIds = await client.lRange(reviewKey, start, end);
 
-       successResponse(res,reviewId,"Review deleted")
-
+      const reviews = await Promise.all(
+        reviewIds.map((id) => client.hGetAll(getReviewDetailsById(id)))
+      );
+      successResponse(res, reviews);
     } catch (error) {
-      next(error)
+      next(error);
     }
+  }
+);
 
-})
+router.delete(
+  "/:restaurantId/review/:reviewId",
+  checkRestaurantId,
+  async (
+    req: Request<{ restaurantId: string; reviewId: string }>,
+    res,
+    next
+  ) => {
+    const { restaurantId, reviewId } = req.params;
+    const reviewKey = getReviewKey(restaurantId);
+    const reviewDetailsKey = getReviewDetailsById(reviewId);
+
+    try {
+      const client = await intilizeRedisClient();
+      const [removeResult, deleteReview] = await Promise.all([
+        client.lRem(reviewKey, 0, reviewId),
+        client.del(reviewDetailsKey),
+      ]);
+
+      if (!removeResult || !deleteReview)
+        return errorResponse(res, 404, "Review not found");
+
+      successResponse(res, reviewId, "Review deleted");
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 export default router;

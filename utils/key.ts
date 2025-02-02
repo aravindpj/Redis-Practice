@@ -11,3 +11,8 @@ export const getReviewKey=(id:string)=>getKeyName("review",id)
 
 export const getReviewDetailsById=(id:string)=>getKeyName("review-details",id)
 
+export const getCuisines=getKeyName("cuisines")
+
+export const getCuisineKey=(name:string)=>getKeyName("cuisines",name)
+
+export const getRestaurantCuisinesKey=(id:string)=>getKeyName("restaurant_cuisines",id)
