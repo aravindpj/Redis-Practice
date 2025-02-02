@@ -5,6 +5,7 @@ import { RestaurantSchema, type Restaurant } from "../schemas/restaurants";
 import {
   getCuisineKey,
   getCuisines,
+  getRestaurantByRating,
   getRestaurantCuisinesKey,
   getRestaurantKeyById,
   getReviewDetailsById,
@@ -17,6 +18,26 @@ import { checkRestaurantId } from "../middleware/checkRestaurantId";
 import { ReviewSchema, type Review } from "../schemas/review";
 
 const router = express.Router();
+
+router.get('/',async (req,res,next)=>{
+    const {page=1, limit=10}=req.query
+    
+    const start= (Number(page) -1) * Number(limit)
+
+    const end= (start + Number(limit)) -1
+
+   try {
+     const client=await intilizeRedisClient()
+      const restaurantIds=await client.zRange(getRestaurantByRating,start, end ,{
+         REV:true
+      })
+      const restaurants=await Promise.all(restaurantIds.map(id=>client.hGetAll(getRestaurantKeyById(id))))
+
+      successResponse(res,restaurants)
+   } catch (error) {
+     next(error)
+   }
+})
 
 router.post(
   "/",
@@ -42,6 +63,10 @@ router.post(
           ])
         ),
         client.hSet(restaurantKey, payload),
+        client.zAdd(getRestaurantByRating,{
+           score:0,
+           value:id
+        })
       ]);
 
       return successResponse(res, payload);
@@ -86,16 +111,24 @@ router.post(
 
     const reviewDetailsKey = getReviewDetailsById(reviewId);
     const reviewKey = getReviewKey(restaurantId);
-
+    const restaurantKey=getRestaurantKeyById(restaurantId)
     const reviewPayload = { id: reviewId, ...data, timeStamp: Date.now() };
 
     try {
       const client = await intilizeRedisClient();
-      await Promise.all([
+      const [reviewCount,rateResult,totalStars] = await Promise.all([
         client.lPush(reviewKey, reviewId),
         client.hSet(reviewDetailsKey, reviewPayload),
+        client.hIncrByFloat(restaurantKey,"totalStars",data.rating)
       ]);
 
+      const avg= Number((reviewCount/totalStars).toFixed(1))
+     
+       await Promise.all([client.zAdd(getRestaurantByRating,{
+           score:avg,
+           value:restaurantId
+      })])
+      
       successResponse(res, reviewPayload);
     } catch (error) {
       next(error);
