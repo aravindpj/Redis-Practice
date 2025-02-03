@@ -18,3 +18,6 @@ export const getCuisineKey=(name:string)=>getKeyName("cuisines",name)
 export const getRestaurantCuisinesKey=(id:string)=>getKeyName("restaurant_cuisines",id)
 
 export const getRestaurantByRating=getKeyName("restaurant_rating")
+
+export const getWeatherKey=(id:string)=> getKeyName('weather',id)
+export const getRestauratDetailsKey=(id:string)=> getKeyName('restaurant_details',id)

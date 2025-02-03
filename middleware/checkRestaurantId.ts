@@ -7,6 +7,7 @@ export const checkRestaurantId=async(req:Request,res:Response,next:NextFunction)
     const client = await intilizeRedisClient()
 
     const {restaurantId}=req.params
+    
 
     if(!restaurantId) return res.status(400).json({status:false,message:"restaurant id not found"})
 
