@@ -8,6 +8,7 @@ import {
   type RestaurantDetails
 } from "../schemas/restaurants";
 import {
+  bloomKey,
   getCuisineKey,
   getCuisines,
   getRestaurantByRating,
@@ -17,6 +18,7 @@ import {
   getReviewDetailsById,
   getReviewKey,
   getWeatherKey,
+  indexKey,
 } from "../utils/key";
 import { nanoid } from "nanoid";
 import { intilizeRedisClient } from "../utils/client";
@@ -53,6 +55,18 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+router.get("/search", async (req, res, next) => {
+  const { q } = req.query;
+  try {
+    const client =  await intilizeRedisClient()
+    const results = await client.ft.search(indexKey, `@name:${q}`);
+    return successResponse(res, results);
+  } catch (error) {
+    next(error);
+  }
+});
+
+
 router.post(
   "/",
   validate(RestaurantSchema),
@@ -63,7 +77,11 @@ router.post(
       const data = req.body as Restaurant;
 
       const id = nanoid();
-
+      const bloomString= `${data.name}:${data.location}`
+      const seenBefore= await client.bf.exists(bloomKey,bloomString)
+      if(seenBefore){
+         return errorResponse(res,404,"dupliacte entry")
+      }
       const restaurantKey = getRestaurantKeyById(id);
 
       const payload = { id, name: data.name, location: data.location };
@@ -81,6 +99,7 @@ router.post(
           score: 0,
           value: id,
         }),
+        client.bf.add(bloomKey,bloomString)
       ]);
 
       return successResponse(res, payload);
